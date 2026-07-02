@@ -20,7 +20,7 @@ import Parser from "rss-parser";
 import nodemailer from "nodemailer";
 import { SOURCES, GROUPS, KEYWORDS, LOOKBACK_HOURS } from "./sources.js";
 
-const MODEL = "claude-sonnet-4-6"; // fast + cheap; fine for summarising
+const MODEL = "claude-sonnet-5"; // fast + cheap; fine for summarising
 const parser = new Parser({ timeout: 15000 });
 
 // ---------- 1. Fetch feeds ----------
