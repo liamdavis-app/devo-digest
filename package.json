@@ -1,0 +1,13 @@
+{
+  "name": "devolution-digest",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Daily email digest of UK local-government and fiscal devolution news, summarised by Claude.",
+  "scripts": {
+    "start": "node digest.js"
+  },
+  "dependencies": {
+    "nodemailer": "^6.9.14",
+    "rss-parser": "^3.13.0"
+  }
+}
