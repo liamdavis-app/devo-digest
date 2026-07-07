@@ -20,7 +20,7 @@ import Parser from "rss-parser";
 import nodemailer from "nodemailer";
 import { SOURCES, GROUPS, KEYWORDS, LOOKBACK_HOURS } from "./sources.js";
 
-const MODEL = "claude-sonnet-4-6"; // fast + cheap; fine for summarising
+const MODEL = "claude-sonnet-5"; // fast + cheap; fine for summarising
 const parser = new Parser({ timeout: 15000 });
 
 // ---------- 1. Fetch feeds ----------
@@ -331,6 +331,11 @@ async function sendEmail(html, count) {
     port: Number(process.env.SMTP_PORT),
     secure: Number(process.env.SMTP_PORT) === 465,
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    // Fail fast instead of hanging indefinitely if the SMTP handshake stalls
+    // (this is what let a run burn the full 6-hour Actions job limit before).
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 20000,
   });
 
   await transporter.sendMail({
