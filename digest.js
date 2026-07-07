@@ -20,34 +20,53 @@ import Parser from "rss-parser";
 import nodemailer from "nodemailer";
 import { SOURCES, GROUPS, KEYWORDS, LOOKBACK_HOURS } from "./sources.js";
 
-const MODEL = "claude-sonnet-5"; // fast + cheap; fine for summarising
+const MODEL = "claude-sonnet-4-6"; // fast + cheap; fine for summarising
 const parser = new Parser({ timeout: 15000 });
 
 // ---------- 1. Fetch feeds ----------
+// Returns { items, failures } so the email can honestly report when a
+// source didn't load, instead of silently pretending the news was quiet.
 async function fetchAll() {
   const results = await Promise.allSettled(
     SOURCES.map(async (s) => {
-      const feed = await parser.parseURL(s.feed);
-      return (feed.items || []).map((item) => ({
-        sourceName: s.name,
-        sourceType: s.type,
-        title: (item.title || "").trim(),
-        link: item.link || item.guid || "",
-        published: item.isoDate || item.pubDate || null,
-        summary: (item.contentSnippet || item.content || item.summary || "")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, 1200),
-      }));
+      try {
+        const feed = await parser.parseURL(s.feed);
+        const items = (feed.items || []).map((item) => ({
+          sourceName: s.name,
+          sourceType: s.type,
+          title: (item.title || "").trim(),
+          link: item.link || item.guid || "",
+          published: item.isoDate || item.pubDate || null,
+          summary: (item.contentSnippet || item.content || item.summary || "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 1200),
+        }));
+        return { name: s.name, ok: true, items };
+      } catch (err) {
+        // Re-throw with the source name attached so we can report it.
+        const e = new Error(err?.message || String(err));
+        e.sourceName = s.name;
+        throw e;
+      }
     })
   );
 
   const items = [];
+  const failures = [];
   for (const r of results) {
-    if (r.status === "fulfilled") items.push(...r.value);
-    else console.error("Feed failed:", r.reason?.message || r.reason);
+    if (r.status === "fulfilled") {
+      items.push(...r.value.items);
+      console.log(`Feed OK: ${r.value.name} (${r.value.items.length} items)`);
+    } else {
+      const name = r.reason?.sourceName || "unknown source";
+      const msg = r.reason?.message || String(r.reason);
+      failures.push({ name, msg });
+      console.error(`Feed FAILED: ${name} — ${msg}`);
+    }
   }
-  return items;
+  console.log(`Feeds: ${SOURCES.length - failures.length} ok, ${failures.length} failed.`);
+  return { items, failures };
 }
 
 // ---------- 2. Filter ----------
@@ -58,8 +77,17 @@ function withinLookback(iso) {
 }
 
 function matchesKeyword(item) {
-  const hay = (item.title + " " + item.summary).toLowerCase();
-  return KEYWORDS.some((k) => hay.includes(k));
+  // Normalise: lowercase, strip punctuation to spaces, collapse whitespace.
+  // This means "devolved powers," and "devolution—" both match cleanly,
+  // and multi-word keywords aren't broken by stray punctuation.
+  const hay = (item.title + " " + item.summary)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ");
+  return KEYWORDS.some((k) => {
+    const key = k.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+    return hay.includes(key);
+  });
 }
 
 // ---------- 3. De-duplicate ----------
@@ -217,6 +245,7 @@ function renderHtml(entries, counts) {
       .hook    { color:#c9ced6 !important; }
       .grouphd { color:#f2f3f5 !important; border-color:#2b2f36 !important; }
       .foot    { color:#6b7280 !important; border-color:#2b2f36 !important; }
+      .warn    { background:#2a2113 !important; border-color:#4a3a1c !important; color:#e0b877 !important; }
     }
     a { color:inherit; }
   </style>`;
@@ -240,17 +269,35 @@ function renderHtml(entries, counts) {
     <div style="font-family:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#8a8f98;margin:0 0 6px" class="kicker">UK Devolution Digest</div>
     <div style="font-size:15px;font-weight:600;color:#15181d;margin:0 0 22px" class="h1">${today}</div>`;
 
+  const failures = counts.failures || [];
+  const okCount = SOURCES.length - failures.length;
+
+  // A visible banner when one or more sources didn't load, so a quiet inbox
+  // is never mistaken for "no news" when it's really "sources broke".
+  const failureBanner = failures.length
+    ? `<div style="background:#fdf3e7;border:1px solid #f0d9b8;border-radius:8px;padding:10px 12px;margin:0 0 18px;font-size:12.5px;line-height:1.45;color:#8a5a1f" class="warn">
+         <strong>Heads up:</strong> ${failures.length} of ${SOURCES.length} sources didn't load today (${escapeHtml(failures.map((f) => f.name).join(", "))}). Today's digest may be incomplete.
+       </div>`
+    : "";
+
   const footer = `
     <div style="border-top:1px solid #e6e8eb;margin-top:8px;padding-top:14px;font-size:11.5px;line-height:1.5;color:#9aa0a8" class="foot">
-      Scanned ${counts.scanned} items across ${SOURCES.length} sources.
+      Scanned ${counts.scanned} items · ${okCount}/${SOURCES.length} sources loaded${failures.length ? ` · ${failures.length} failed` : ""}.
       Summaries are generated by Claude from feed excerpts and may contain errors — open the source before relying on anything.
     </div>`;
 
   if (entries.length === 0) {
-    const inner = `${header}
-      <div style="font-size:15px;line-height:1.55;color:#33383f">Nothing new on the watchlist today. The scan ran and found no matching items.</div>
+    // Distinguish a genuinely quiet day from a day where sources broke.
+    const quietMsg = failures.length
+      ? `No matching items came through — but note that ${failures.length} source${failures.length === 1 ? "" : "s"} failed to load today, so this may be a gap rather than a quiet news day.`
+      : "Nothing new on the watchlist today. All sources loaded fine — it was simply a quiet day.";
+    const inner = `${header}${failureBanner}
+      <div style="font-size:15px;line-height:1.55;color:#33383f">${quietMsg}</div>
       ${footer}`;
-    return shell(inner, `Nothing new today — scan of ${SOURCES.length} sources ran clean.`);
+    const pre = failures.length
+      ? `No items — but ${failures.length} source(s) failed to load.`
+      : `Nothing new today — all ${SOURCES.length} sources loaded clean.`;
+    return shell(inner, pre);
   }
 
   // Group into sections in GROUPS order; skip empty groups.
@@ -275,7 +322,7 @@ function renderHtml(entries, counts) {
     `${entries.length} item${entries.length === 1 ? "" : "s"} · ` +
     entries.slice(0, 2).map((e) => e.title || e.author).filter(Boolean).join(" · ");
 
-  return shell(`${header}${sections}${orphanSection}${footer}`, preheader);
+  return shell(`${header}${failureBanner}${sections}${orphanSection}${footer}`, preheader);
 }
 
 async function sendEmail(html, count) {
@@ -296,13 +343,13 @@ async function sendEmail(html, count) {
 
 // ---------- main ----------
 (async () => {
-  const raw = await fetchAll();
-  const scanned = raw.length;
-  const filtered = dedupe(raw.filter((i) => withinLookback(i.published) && matchesKeyword(i)));
+  const { items, failures } = await fetchAll();
+  const scanned = items.length;
+  const filtered = dedupe(items.filter((i) => withinLookback(i.published) && matchesKeyword(i)));
   console.log(`Scanned ${scanned}, kept ${filtered.length} after filter + dedupe.`);
 
   const entries = await summarise(filtered);
-  const html = renderHtml(entries, { scanned });
+  const html = renderHtml(entries, { scanned, failures });
   await sendEmail(html, entries.length);
   console.log("Digest sent.");
 })().catch((err) => {
