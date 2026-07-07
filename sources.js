@@ -5,55 +5,74 @@
 //
 // "type" groups items in the email: "thinktank" | "official" | "press".
 //
-// To add a source: find its RSS feed URL and add a { name, type, feed } row.
-// To tune what gets through: edit KEYWORDS below.
+// TWO KINDS OF SOURCE below:
+//   1. Native RSS feeds — the source's own feed. Cleanest data when they work.
+//   2. Google News "site:" queries — a reliable fallback that pulls one
+//      organisation's output through Google News RSS. Used for orgs whose
+//      native feed was dead or malformed (404s / bad XML). Slightly noisier
+//      but far more reliable — and proven to work in practice.
+//
+// To add a native feed:   { name, type, feed: "https://.../feed" }
+// To add a Google source: use googleSite() or googleQuery() helpers below.
+
+// Build a Google News RSS URL from a raw query string (already URL-encoded).
+const GNEWS = (q) =>
+  "https://news.google.com/rss/search?q=" + q + "&hl=en-GB&gl=GB&ceid=GB:en";
+
+// One organisation's output, filtered to relevant topics.
+// site:domain limits to that org; the topic terms keep it on-brief.
+const googleSite = (domain) =>
+  GNEWS(
+    `site:${domain}+(devolution+OR+council+OR+%22local+government%22+OR+funding+OR+housing+OR+mayor)`
+  );
 
 export const SOURCES = [
   // --- Think tanks ---
-  { name: "IPPR",                     type: "thinktank", feed: "https://www.ippr.org/feed" },
-  { name: "Centre for Cities",        type: "thinktank", feed: "https://www.centreforcities.org/feed/" },
-  { name: "Institute for Government", type: "thinktank", feed: "https://www.instituteforgovernment.org.uk/feed" },
+  // These five use Google News site: queries because their native RSS feeds
+  // were dead (404) or returned malformed XML. Google News covers them
+  // reliably. Swap back to a native feed here if you find a working one.
+  { name: "IPPR",                     type: "thinktank", feed: googleSite("ippr.org") },
+  { name: "Centre for Cities",        type: "thinktank", feed: googleSite("centreforcities.org") },
+  { name: "Institute for Government", type: "thinktank", feed: googleSite("instituteforgovernment.org.uk") },
+  { name: "Reform",                   type: "thinktank", feed: googleSite("reform.uk") },
+
+  // These three native feeds work — leave them as-is.
   { name: "Resolution Foundation",    type: "thinktank", feed: "https://www.resolutionfoundation.org/feed/" },
   { name: "New Local",                type: "thinktank", feed: "https://www.newlocal.org.uk/feed/" },
+
+  // These two load but often return 0 items — harmless, kept per your call.
   { name: "Onward",                   type: "thinktank", feed: "https://www.ukonward.com/feed/" },
-  { name: "Reform",                   type: "thinktank", feed: "https://reform.uk/feed/" },
   { name: "Localis",                  type: "thinktank", feed: "https://www.localis.org.uk/feed/" },
 
-  // --- Official / Parliament ---
+  // --- Official / Parliament (native feeds, working) ---
   { name: "Commons Library",          type: "official",  feed: "https://commonslibrary.parliament.uk/feed/" },
   { name: "National Audit Office",    type: "official",  feed: "https://www.nao.org.uk/feed/" },
 
-  // --- Sector press (council finance / local gov) ---
-  { name: "Room151",                  type: "press",     feed: "https://www.room151.co.uk/feed/" },
-  { name: "LGC",                      type: "press",     feed: "https://www.lgcplus.com/feed/" },
-  { name: "The MJ",                   type: "press",     feed: "https://www.themj.co.uk/rss" },
+  // --- Sector press ---
+  { name: "Room151",                  type: "press",     feed: "https://www.room151.co.uk/feed/" }, // native, works
+  { name: "LGC",                      type: "press",     feed: "https://www.lgcplus.com/feed/" },    // native, works
+  // The MJ's native feed 404s — via Google News instead.
+  { name: "The MJ",                   type: "press",     feed: googleSite("themj.co.uk") },
 
-  // --- Catch-all: Google News queries as RSS feeds ---
-  // These backstop the curated feeds and catch gov.uk publications, academic
-  // pieces, and anything the named sources miss. Two complementary queries
-  // widen the net. Tagged "press" for grouping.
-  //
-  // The query is the bit after q= and before &hl. It's URL-encoded:
-  //   %22 = a double-quote (for exact phrases)   + = a space   OR = literal OR
-  // To tune, edit the phrases; keep the &hl=en-GB&gl=GB&ceid=GB:en tail so
-  // results stay UK-focused.
+  // --- Broad catch-all: Google News topic queries ---
+  // Backstop the named sources and catch gov.uk publications, academic
+  // pieces, and anything else. Two complementary queries widen the net.
+  //   %22 = a double-quote (exact phrase)   + = a space   OR = literal OR
   {
     name: "Google News (devolution)",
     type: "press",
-    feed:
-      "https://news.google.com/rss/search?q=" +
+    feed: GNEWS(
       "(%22devolution%22+OR+%22combined+authority%22+OR+%22strategic+authority%22+OR+%22metro+mayor%22)" +
-      "+(council+OR+funding+OR+finance+OR+powers)+UK" +
-      "&hl=en-GB&gl=GB&ceid=GB:en",
+      "+(council+OR+funding+OR+finance+OR+powers)+UK"
+    ),
   },
   {
     name: "Google News (council finance)",
     type: "press",
-    feed:
-      "https://news.google.com/rss/search?q=" +
+    feed: GNEWS(
       "(%22council+tax%22+OR+%22business+rates%22+OR+%22section+114%22+OR+%22council+housing%22+OR+%22local+government+finance%22)" +
-      "+UK" +
-      "&hl=en-GB&gl=GB&ceid=GB:en",
+      "+UK"
+    ),
   },
 ];
 
