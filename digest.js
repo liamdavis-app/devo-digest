@@ -144,7 +144,11 @@ async function summarise(items) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 4000,
+      // Google News links are long redirect URLs (~500 chars each), so a
+      // day with a dozen matched items can overflow a smaller budget and
+      // get cut off mid-JSON, which crashes the whole run before any email
+      // sends. 4000 was hit in practice; 8000 gives real headroom.
+      max_tokens: 8000,
       system,
       messages: [
         {
