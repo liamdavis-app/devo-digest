@@ -28,13 +28,32 @@ export const SOURCES = [
   { name: "LGC",                      type: "press",     feed: "https://www.lgcplus.com/feed/" },
   { name: "The MJ",                   type: "press",     feed: "https://www.themj.co.uk/rss" },
 
-  // --- Catch-all: Google News query as an RSS feed ---
-  // Backstops the curated feeds and catches gov.uk publications, academic
-  // pieces, and anything the named sources miss. Tagged "press" for grouping.
+  // --- Catch-all: Google News queries as RSS feeds ---
+  // These backstop the curated feeds and catch gov.uk publications, academic
+  // pieces, and anything the named sources miss. Two complementary queries
+  // widen the net. Tagged "press" for grouping.
+  //
+  // The query is the bit after q= and before &hl. It's URL-encoded:
+  //   %22 = a double-quote (for exact phrases)   + = a space   OR = literal OR
+  // To tune, edit the phrases; keep the &hl=en-GB&gl=GB&ceid=GB:en tail so
+  // results stay UK-focused.
   {
     name: "Google News (devolution)",
     type: "press",
-    feed: "https://news.google.com/rss/search?q=%22fiscal+devolution%22+OR+%22local+government+devolution%22+OR+%22combined+authority%22+UK&hl=en-GB&gl=GB&ceid=GB:en",
+    feed:
+      "https://news.google.com/rss/search?q=" +
+      "(%22devolution%22+OR+%22combined+authority%22+OR+%22strategic+authority%22+OR+%22metro+mayor%22)" +
+      "+(council+OR+funding+OR+finance+OR+powers)+UK" +
+      "&hl=en-GB&gl=GB&ceid=GB:en",
+  },
+  {
+    name: "Google News (council finance)",
+    type: "press",
+    feed:
+      "https://news.google.com/rss/search?q=" +
+      "(%22council+tax%22+OR+%22business+rates%22+OR+%22section+114%22+OR+%22council+housing%22+OR+%22local+government+finance%22)" +
+      "+UK" +
+      "&hl=en-GB&gl=GB&ceid=GB:en",
   },
 ];
 
@@ -45,29 +64,65 @@ export const GROUPS = [
   { type: "press",     label: "Sector press & other" },
 ];
 
-// An item is kept only if its title OR summary contains at least one keyword.
-// Lowercased, matched as substrings. Keep these tight to avoid noise.
+// An item is kept if its title OR summary contains any keyword.
+// Matching is punctuation-insensitive substring (see matchesKeyword).
+//
+// TIP: prefer STEMS over full words. "devolv" catches devolve, devolved,
+// devolving, devolution and devolutionary in one. "settle" catches
+// settlement and settlements. This is the main lever if you're getting
+// too few items — shorten a keyword to its stem. If you get NOISE, make
+// a keyword longer/more specific again.
 export const KEYWORDS = [
+  // core devolution — stems catch all variants
+  "devolv",              // devolve / devolved / devolving / devolution
   "devolution",
-  "devolved",
-  "fiscal devolution",
-  "combined authority",
-  "combined authorities",
+  "combined authorit",   // authority / authorities
   "mayoral",
   "metro mayor",
+  "metro-mayor",
+  "elected mayor",
+  "strategic authorit",  // the new English Devolution term
+  "county deal",
+  "devolution deal",
+  "english devolution",
+
+  // council / local government finance
   "council tax",
   "business rates",
   "local government finance",
+  "local government funding",
   "council finance",
-  "levelling up",
-  "english devolution",
-  "council housing",
-  "housebuilding",
-  "local growth",
+  "council funding",
+  "local authority finance",
+  "local authority funding",
   "fair funding",
+  "funding formula",
   "revenue support grant",
-  "section 114",
   "single settlement",
+  "multi-year settlement",
+  "section 114",
+  "s114",
+  "financial sustainability",
+  "council bankrupt",    // "bankrupt" / "bankruptcy"
+
+  // housing / growth (your platform's core)
+  "council housing",
+  "council house",
+  "housebuilding",
+  "house building",
+  "social housing",
+  "hra",                 // Housing Revenue Account
+  "housing revenue account",
+  "right to buy",
+  "local growth",
+  "growth plan",
+  "levelling up",
+
+  // institutions / policy vehicles that signal relevance
+  "mhclg",               // the department
+  "local government reorganisation",
+  "unitary",             // unitary authority / reorganisation
+  "precept",
 ];
 
 // How far back to look each run (hours). 26 gives a little overlap
