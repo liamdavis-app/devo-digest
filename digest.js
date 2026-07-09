@@ -105,9 +105,46 @@ function dedupe(items) {
 }
 
 // ---------- 4. Summarise with Claude ----------
-async function summarise(items) {
-  if (items.length === 0) return [];
+// Items are sent in small batches rather than one big call: Google News
+// links are long redirect URLs (~500 chars each), so even a modest item
+// count can overflow a token budget and get cut off mid-JSON. Batching
+// keeps each call's output size predictable regardless of how many items
+// a given day produces.
+const CHUNK_SIZE = 8;
 
+// The digest format is a flat array of flat objects (no nesting), so if a
+// response gets cut off mid-string we can still recover every object that
+// closed cleanly before the cut, by tracking brace depth + string state
+// and truncating to the last complete object.
+function repairTruncatedJsonArray(text) {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let lastObjectEnd = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) lastObjectEnd = i + 1;
+    }
+  }
+  if (lastObjectEnd === -1) return null;
+  try {
+    return JSON.parse(text.slice(0, lastObjectEnd) + "\n]");
+  } catch {
+    return null;
+  }
+}
+
+async function summariseChunk(items, chunkLabel) {
   const system =
     "You are a research analyst producing a daily digest on UK local-government " +
     "and fiscal devolution for a policy-literate reader. For each item you are " +
@@ -144,10 +181,6 @@ async function summarise(items) {
     },
     body: JSON.stringify({
       model: MODEL,
-      // Google News links are long redirect URLs (~500 chars each), so a
-      // day with a dozen matched items can overflow a smaller budget and
-      // get cut off mid-JSON, which crashes the whole run before any email
-      // sends. 4000 was hit in practice; 8000 gives real headroom.
       max_tokens: 8000,
       system,
       messages: [
@@ -175,9 +208,34 @@ async function summarise(items) {
   try {
     return JSON.parse(text);
   } catch (e) {
-    console.error("Could not parse Claude output:\n", text);
+    const repaired = repairTruncatedJsonArray(text);
+    if (repaired) {
+      console.warn(
+        `${chunkLabel}: response was truncated (stop_reason: ${data.stop_reason}); ` +
+          `recovered ${repaired.length}/${items.length} items from this batch.`
+      );
+      return repaired;
+    }
+    console.error(`${chunkLabel}: could not parse or repair Claude output:\n`, text);
     throw e;
   }
+}
+
+async function summarise(items) {
+  if (items.length === 0) return [];
+
+  const chunks = [];
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    chunks.push(items.slice(i, i + CHUNK_SIZE));
+  }
+
+  const results = [];
+  for (let c = 0; c < chunks.length; c++) {
+    const label = `Batch ${c + 1}/${chunks.length}`;
+    const entries = await summariseChunk(chunks[c], label);
+    results.push(...entries);
+  }
+  return results;
 }
 
 // ---------- 5. Render + send ----------
